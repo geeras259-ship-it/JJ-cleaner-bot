@@ -3,7 +3,6 @@ const http = require("http");
 
 const BOT_TOKEN = (process.env.BOT_TOKEN || "").trim();
 const TARGET_CHANNEL_ID = (process.env.CHANNEL_ID || "-1003905680085").trim();
-const WEBSITE_URL = "https://jj-movies.pages.dev";
 
 if (!BOT_TOKEN) {
   console.error("Missing BOT_TOKEN!");
@@ -35,26 +34,15 @@ bot.on("polling_error", (err) => {
 process.on("uncaughtException", (err) => console.error("Uncaught:", err.message));
 process.on("unhandledRejection", (r) => console.error("Unhandled:", r));
 
-// Start Command with Inline Website Button (Tanglish Style)
+// Start Command
 bot.onText(/\/start/, (msg) => {
-  const opts = {
-    parse_mode: "Markdown",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "🌐 Open JJ Movies Site", url: WEBSITE_URL }
-        ]
-      ]
-    }
-  };
-
   bot.sendMessage(
     msg.chat.id,
     `👋 *JJ Cleaner Bot Online!*\n\n` +
-    `🤖 *Status:* Active & Button Enabled\n` +
+    `🤖 *Status:* Active\n` +
     `📢 *Target Channel:* \`${TARGET_CHANNEL_ID}\`\n\n` +
-    `📌 *Files forward cheyagane, links anni remove chesi neat title tho post chesi kinda website button isthundi!*`,
-    opts
+    `📌 *Files forward cheyagane, links anni remove chesi neat title tho target channel lo post chesthundi!*`,
+    { parse_mode: "Markdown" }
   );
 });
 
@@ -77,7 +65,7 @@ function fixFancyFonts(str) {
     });
 }
 
-// Advanced Cleaner (Without text watermark, only clean title)
+// Advanced Cleaner (Only clean title)
 function cleanCaption(text, fileName = "") {
   let clean = fixFancyFonts(text || "");
 
@@ -104,24 +92,16 @@ function cleanCaption(text, fileName = "") {
     clean = fileName.replace(/\.(mkv|mp4|avi)$/i, "").replace(/[\._]/g, " ").trim();
   }
 
-  // Returns ONLY the clean title (No text watermark)
   return clean;
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Auto-Retry Wrapper for Telegram 429 Rate Limits (Sends Clean Title + Button)
+// Auto-Retry Wrapper for Telegram 429 Rate Limits (Clean Title Only, No Button)
 async function sendMediaWithRetry(isVideo, fileId, caption, maxRetries = 5) {
   const extraOptions = {
     caption,
-    parse_mode: "Markdown",
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "🌐 Open JJ Movies Site", url: WEBSITE_URL }
-        ]
-      ]
-    }
+    parse_mode: "Markdown"
   };
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
@@ -165,13 +145,8 @@ bot.on("message", (msg) => {
 
   cleanQueue = cleanQueue
     .then(async () => {
-      // Send cleaned media with clean title and web button only
       await sendMediaWithRetry(isVideo, file.file_id, finalCleanCaption);
-
-      // Instant confirmation to admin chat
-      bot.sendMessage(chatId, `✅ Cleaned & Button Posted: \`${rawFileName.substring(0, 30)}\``, { parse_mode: "Markdown" }).catch(() => {});
-
-      // Short delay to avoid Telegram flood limits
+      bot.sendMessage(chatId, `✅ Cleaned & Posted: \`${rawFileName.substring(0, 30)}\``, { parse_mode: "Markdown" }).catch(() => {});
       await sleep(800);
     })
     .catch((err) => {
@@ -180,4 +155,4 @@ bot.on("message", (msg) => {
     });
 });
 
-console.log("JJ Cleaner Bot Ready with Clean Title and Button Only!");
+console.log("JJ Cleaner Bot Ready (Clean Title Only, No Button)!");
