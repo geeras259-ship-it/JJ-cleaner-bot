@@ -34,15 +34,14 @@ bot.on("polling_error", (err) => {
 process.on("uncaughtException", (err) => console.error("Uncaught:", err.message));
 process.on("unhandledRejection", (r) => console.error("Unhandled:", r));
 
-// Start Command
+// Start Command (Plain text - zero entity errors)
 bot.onText(/\/start/, (msg) => {
   bot.sendMessage(
     msg.chat.id,
-    `👋 *JJ Cleaner Bot Online!*\n\n` +
-    `🤖 *Status:* Active\n` +
-    `📢 *Target Channel:* \`${TARGET_CHANNEL_ID}\`\n\n` +
-    `📌 *Files forward cheyagane, links anni remove chesi neat title tho target channel lo post chesthundi!*`,
-    { parse_mode: "Markdown" }
+    `👋 JJ Cleaner Bot Online!\n\n` +
+    `🤖 Status: Active (Bulk Queue Ready)\n` +
+    `📢 Target Channel: ${TARGET_CHANNEL_ID}\n\n` +
+    `📌 100+ files forward chesina, queue lo petti okkati okkati ga neat title tho target channel lo post chesthundi!`
   );
 });
 
@@ -92,17 +91,15 @@ function cleanCaption(text, fileName = "") {
     clean = fileName.replace(/\.(mkv|mp4|avi)$/i, "").replace(/[\._]/g, " ").trim();
   }
 
-  return clean;
+  // Telegram caption max length is 1024 characters
+  return clean.slice(0, 1024);
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-// Auto-Retry Wrapper for Telegram 429 Rate Limits (Clean Title Only, No Button)
-async function sendMediaWithRetry(isVideo, fileId, caption, maxRetries = 5) {
-  const extraOptions = {
-    caption,
-    parse_mode: "Markdown"
-  };
+// Auto-Retry Wrapper for Telegram 429 Rate Limits & Network Errors (Plain text only)
+async function sendMediaWithRetry(isVideo, fileId, caption, maxRetries = 10) {
+  const extraOptions = { caption };
 
   for (let attempt = 1; attempt <= maxRetries; attempt++) {
     try {
@@ -117,18 +114,53 @@ async function sendMediaWithRetry(isVideo, fileId, caption, maxRetries = 5) {
       const retryMatch = errMsg.match(/retry after (\d+)/i);
       const waitSeconds = retryAfterParam || (retryMatch ? parseInt(retryMatch[1], 10) : null);
 
+      // 1. Telegram 429 Flood Wait
       if (waitSeconds && attempt < maxRetries) {
-        console.log(`429 Rate limit hit. Waiting ${waitSeconds + 1}s before retrying...`);
-        await sleep((waitSeconds + 1) * 1000);
+        console.log(`⏳ 429 Flood Wait. Sleeping ${waitSeconds + 2}s (Attempt ${attempt}/${maxRetries})...`);
+        await sleep((waitSeconds + 2) * 1000);
         continue;
       }
+
+      // 2. Temporary Network / Server Errors
+      const isTransient = /(ETIMEDOUT|ECONNRESET|EFATAL|502|503|504|socket hang up)/i.test(errMsg);
+      if (isTransient && attempt < maxRetries) {
+        console.log(`🔄 Network error (${errMsg}). Retrying in 5s (Attempt ${attempt}/${maxRetries})...`);
+        await sleep(5000);
+        continue;
+      }
+
       throw err;
     }
   }
 }
 
-// Fast Sequential Queue for smooth batch uploading
-let cleanQueue = Promise.resolve();
+// Persistent Array Queue for 100+ Bulk Files
+const uploadQueue = [];
+let isProcessing = false;
+
+async function processQueue() {
+  if (isProcessing) return;
+  isProcessing = true;
+
+  while (uploadQueue.length > 0) {
+    const job = uploadQueue.shift();
+    const { chatId, isVideo, fileId, rawFileName, finalCleanCaption } = job;
+
+    try {
+      await sendMediaWithRetry(isVideo, fileId, finalCleanCaption);
+      console.log(`✅ Posted (${uploadQueue.length} left): ${rawFileName}`);
+      bot.sendMessage(chatId, `✅ Posted (${uploadQueue.length} left): ${rawFileName.substring(0, 40)}`).catch(() => {});
+    } catch (err) {
+      console.error("Channel post error:", err.message);
+      bot.sendMessage(chatId, `❌ Post failed (${rawFileName}): ${err.message}`).catch(() => {});
+    }
+
+    // Safe 3.2s delay to stay under Telegram's ~20 msg/min channel limit
+    await sleep(3200);
+  }
+
+  isProcessing = false;
+}
 
 bot.on("message", (msg) => {
   if (msg.chat.type !== "private") return;
@@ -140,19 +172,16 @@ bot.on("message", (msg) => {
   const rawText = msg.caption || msg.text || "";
   const rawFileName = file.file_name || "Movie File";
   const finalCleanCaption = cleanCaption(rawText, rawFileName);
-  const chatId = msg.chat.id;
-  const isVideo = Boolean(msg.video);
 
-  cleanQueue = cleanQueue
-    .then(async () => {
-      await sendMediaWithRetry(isVideo, file.file_id, finalCleanCaption);
-      bot.sendMessage(chatId, `✅ Cleaned & Posted: \`${rawFileName.substring(0, 30)}\``, { parse_mode: "Markdown" }).catch(() => {});
-      await sleep(800);
-    })
-    .catch((err) => {
-      console.error("Channel post error:", err.message);
-      bot.sendMessage(chatId, `❌ Post failed (${rawFileName}): ${err.message}`).catch(() => {});
-    });
+  uploadQueue.push({
+    chatId: msg.chat.id,
+    isVideo: Boolean(msg.video),
+    fileId: file.file_id,
+    rawFileName,
+    finalCleanCaption
+  });
+
+  processQueue();
 });
 
-console.log("JJ Cleaner Bot Ready (Clean Title Only, No Button)!");
+console.log("JJ Cleaner Bot Ready (Bulk 100+ Queue & Zero Parse Errors)!");
